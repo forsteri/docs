@@ -12,23 +12,23 @@ flowchart TB
         User[👤 ユーザー]
     end
 
-    subgraph AWS Cloud
-        subgraph Public Subnet
+    subgraph AWS_Cloud[AWS Cloud]
+        subgraph Public_Subnet[Public Subnet]
             ALB[Application Load Balancer]
             NAT[NAT Gateway]
         end
 
-        subgraph Private Subnet - App
+        subgraph Private_App[Private Subnet - App]
             ECS1[ECS Task]
             ECS2[ECS Task]
         end
 
-        subgraph Private Subnet - DB
+        subgraph Private_DB[Private Subnet - DB]
             RDS[(RDS Primary)]
             RDS_S[(RDS Standby)]
         end
 
-        subgraph Shared Services
+        subgraph Shared[Shared Services]
             SM[Secrets Manager]
             CW[CloudWatch]
             S3[(S3)]
@@ -36,13 +36,19 @@ flowchart TB
     end
 
     User --> ALB
-    ALB --> ECS1 & ECS2
-    ECS1 & ECS2 --> RDS
-    RDS -.-> |同期レプリケーション| RDS_S
-    ECS1 & ECS2 --> NAT
-    ECS1 & ECS2 --> SM
-    ECS1 & ECS2 --> S3
-    ECS1 & ECS2 -.-> CW
+    ALB --> ECS1
+    ALB --> ECS2
+    ECS1 --> RDS
+    ECS2 --> RDS
+    RDS -.-> RDS_S
+    ECS1 --> NAT
+    ECS2 --> NAT
+    ECS1 --> SM
+    ECS2 --> SM
+    ECS1 --> S3
+    ECS2 --> S3
+    ECS1 -.-> CW
+    ECS2 -.-> CW
 ```
 
 ### サーバーレス API パターン
@@ -56,10 +62,10 @@ flowchart LR
         Lambda --> DynamoDB[(DynamoDB)]
         Lambda --> S3[(S3)]
         
-        APIGW -.-> |認証| Cognito[Cognito]
-        Lambda -.-> |ログ| CWLogs[CloudWatch Logs]
+        APIGW -.-> Cognito[Cognito]
+        Lambda -.-> CWLogs[CloudWatch Logs]
         
-        DynamoDB --> |Stream| Lambda2[Lambda]
+        DynamoDB --> Lambda2[Lambda Trigger]
         Lambda2 --> SNS[SNS]
         SNS --> SQS[SQS]
     end
@@ -69,38 +75,40 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    subgraph Management Account
+    subgraph Management[Management Account]
         Org[AWS Organizations]
         SSO[IAM Identity Center]
     end
 
-    subgraph Security Account
+    subgraph Security[Security Account]
         GuardDuty[GuardDuty]
         SecurityHub[Security Hub]
         Config[AWS Config]
     end
 
-    subgraph Log Account
+    subgraph Logging[Log Account]
         CT[(CloudTrail Logs)]
         CWL[(CloudWatch Logs)]
     end
 
-    subgraph Workload Accounts
-        subgraph Production
-            Prod[本番環境]
-        end
-        subgraph Staging
-            Stg[検証環境]
-        end
-        subgraph Development
-            Dev[開発環境]
-        end
+    subgraph Workloads[Workload Accounts]
+        Prod[Production]
+        Stg[Staging]
+        Dev[Development]
     end
 
-    Org --> |管理| Production & Staging & Development
-    SSO --> |認証| Production & Staging & Development
-    Production & Staging & Development -.-> |ログ集約| Log Account
-    Production & Staging & Development -.-> |セキュリティ監視| Security Account
+    Org --> Prod
+    Org --> Stg
+    Org --> Dev
+    SSO --> Prod
+    SSO --> Stg
+    SSO --> Dev
+    Prod -.-> Logging
+    Stg -.-> Logging
+    Dev -.-> Logging
+    Prod -.-> Security
+    Stg -.-> Security
+    Dev -.-> Security
 ```
 
 ## シーケンス図（詳細版）
@@ -110,20 +118,20 @@ flowchart TB
 ```mermaid
 sequenceDiagram
     autonumber
-    participant User as 👤 ユーザー
-    participant App as 📱 アプリ
-    participant Auth as 🔐 認証サーバー
-    participant API as 🖥️ APIサーバー
+    participant User as ユーザー
+    participant App as アプリ
+    participant Auth as 認証サーバー
+    participant API as APIサーバー
 
     User->>App: ログインボタンクリック
-    App->>Auth: 認証リクエスト（client_id, redirect_uri, scope）
+    App->>Auth: 認証リクエスト
     Auth->>User: ログイン画面表示
     User->>Auth: 認証情報入力
     Auth->>Auth: 認証処理
-    Auth->>App: 認可コード発行（redirect）
-    App->>Auth: トークンリクエスト（認可コード）
-    Auth->>App: アクセストークン + リフレッシュトークン
-    App->>API: APIリクエスト + アクセストークン
+    Auth->>App: 認可コード発行
+    App->>Auth: トークンリクエスト
+    Auth->>App: アクセストークン発行
+    App->>API: APIリクエスト
     API->>API: トークン検証
     API->>App: レスポンス
     App->>User: 結果表示
@@ -144,13 +152,13 @@ sequenceDiagram
     participant Manager as マネージャー
 
     Monitor->>PD: アラート発報
-    PD->>L1: 通知（電話・Slack）
+    PD->>L1: 通知
     
     alt 15分以内に応答あり
-        L1->>PD: 応答（Acknowledge）
+        L1->>PD: 応答
         L1->>L1: 調査・対応
         alt 対応可能
-            L1->>PD: 解決（Resolve）
+            L1->>PD: 解決
         else エスカレーション必要
             L1->>PD: エスカレーション
             PD->>L2: 通知
@@ -215,35 +223,38 @@ stateDiagram-v2
 
 ## Gitブランチ戦略
 
-### Git-flow
+### Git-flow（フローチャート表現）
 
 ```mermaid
-gitgraph
-    commit id: "init"
-    branch develop
-    checkout develop
-    commit id: "dev-1"
-    
-    branch feature/login
-    commit id: "feat-1"
-    commit id: "feat-2"
-    checkout develop
-    merge feature/login id: "merge-feat"
-    
-    branch release/1.0
-    commit id: "bump-ver"
-    checkout main
-    merge release/1.0 id: "v1.0" tag: "v1.0.0"
-    checkout develop
-    merge release/1.0
+flowchart LR
+    subgraph main_branch[main]
+        M1((v1.0.0)) --> M2((v1.0.1))
+    end
 
-    checkout main
-    branch hotfix/bug
-    commit id: "fix"
-    checkout main
-    merge hotfix/bug id: "v1.0.1" tag: "v1.0.1"
-    checkout develop
-    merge hotfix/bug
+    subgraph develop_branch[develop]
+        D1((dev)) --> D2((dev)) --> D3((dev)) --> D4((dev))
+    end
+
+    subgraph feature[feature/login]
+        F1((feat)) --> F2((feat))
+    end
+
+    subgraph release[release/1.0]
+        R1((release))
+    end
+
+    subgraph hotfix[hotfix/bug]
+        H1((fix))
+    end
+
+    D1 --> F1
+    F2 --> D2
+    D3 --> R1
+    R1 --> M1
+    R1 --> D4
+    M1 --> H1
+    H1 --> M2
+    H1 --> D4
 ```
 
 ## ガントチャート
@@ -253,7 +264,7 @@ gitgraph
 ```mermaid
 gantt
     title MkDocs導入プロジェクト
-    dateFormat  YYYY-MM-DD
+    dateFormat YYYY-MM-DD
     section 準備
         要件整理           :done, req, 2025-01-06, 3d
         技術検証           :done, poc, after req, 5d
@@ -285,7 +296,6 @@ erDiagram
         uuid team_id PK
         string name
         string description
-        timestamp created_at
     }
 
     USER {
@@ -293,8 +303,6 @@ erDiagram
         uuid team_id FK
         string email
         string name
-        enum role "admin,editor,viewer"
-        timestamp last_login
     }
 
     DOCUMENT {
@@ -303,9 +311,6 @@ erDiagram
         uuid category_id FK
         string title
         text content
-        enum status "draft,review,published,archived"
-        timestamp created_at
-        timestamp updated_at
     }
 
     VERSION {
@@ -313,8 +318,6 @@ erDiagram
         uuid doc_id FK
         int version_number
         text content
-        uuid updated_by FK
-        timestamp created_at
     }
 
     TAG {
@@ -327,7 +330,6 @@ erDiagram
         uuid category_id PK
         uuid parent_id FK
         string name
-        int sort_order
     }
 
     COMMENT {
@@ -335,7 +337,6 @@ erDiagram
         uuid doc_id FK
         uuid user_id FK
         text body
-        timestamp created_at
     }
 ```
 
@@ -353,56 +354,69 @@ pie showData
     "その他" : 5
 ```
 
-## C4モデル（システムコンテキスト図）
+## システムコンテキスト図
+
+### ドキュメント管理システム全体像
 
 ```mermaid
-C4Context
-    title ドキュメント管理システム - システムコンテキスト
-
-    Person(dev, "開発者", "ドキュメントを作成・編集")
-    Person(reader, "閲覧者", "ドキュメントを参照")
-
-    System(docs, "ドキュメント管理システム", "MkDocs + S3 + CloudFront")
-
-    System_Ext(git, "Git Repository", "ソースコード管理")
-    System_Ext(cicd, "CI/CD", "自動ビルド・デプロイ")
-    System_Ext(idp, "IdP", "認証基盤")
-
-    Rel(dev, git, "Push")
-    Rel(git, cicd, "Trigger")
-    Rel(cicd, docs, "Deploy")
-    Rel(dev, docs, "Preview")
-    Rel(reader, docs, "閲覧")
-    Rel(docs, idp, "認証")
+flowchart TB
+    Dev[👤 開発者] --> |Push| Git[Git Repository]
+    Reader[👤 閲覧者] --> |閲覧| Docs[ドキュメントシステム]
+    
+    Git --> |Trigger| CICD[CI/CD]
+    CICD --> |Deploy| Docs
+    Dev --> |Preview| Docs
+    Docs --> |認証| IdP[IdP]
+    
+    subgraph DocSystem[ドキュメント管理システム]
+        Docs
+    end
+    
+    subgraph External[外部システム]
+        Git
+        CICD
+        IdP
+    end
 ```
 
-## マインドマップ
+## サービス分類図
 
-### AWSサービス分類
+### AWSサービスカテゴリ
 
 ```mermaid
-mindmap
-    root((AWS))
-        Compute
-            EC2
-            Lambda
-            ECS
-            EKS
-        Storage
-            S3
-            EBS
-            EFS
-            FSx
-        Database
-            RDS
-            DynamoDB
-            Aurora
-            ElastiCache
-        Network
-            VPC
-            CloudFront
-            Route53
-            API Gateway
+flowchart TB
+    AWS((AWS)) --> Compute
+    AWS --> Storage
+    AWS --> Database
+    AWS --> Network
+
+    subgraph Compute
+        EC2
+        Lambda
+        ECS
+        EKS
+    end
+
+    subgraph Storage
+        S3
+        EBS
+        EFS
+        FSx
+    end
+
+    subgraph Database
+        RDS
+        DynamoDB
+        Aurora
+        ElastiCache
+    end
+
+    subgraph Network
+        VPC
+        CloudFront
+        Route53
+        APIGateway[API Gateway]
+    end
 ```
 
 ---
